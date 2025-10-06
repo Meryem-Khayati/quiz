@@ -1,81 +1,255 @@
 <!DOCTYPE html>
 <html lang="fr">
+
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Document</title>
-  <link rel="stylesheet" href="style.css"/>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+    <link rel="stylesheet" href="style.css">
+   
 </head>
+
 <body>
-  <div>
-    <h1>Veuillez choisir le type de quiz </h1>
-    <form id="formid">
-      <label for="amount">Nombre de questions</label>
-      <input type="number" id="amount" required><br>
+    <div class="container">
+        <div id="config-screen">
+            <h1>Quiz</h1>
+            <form id="quiz-config" class="config-form">
+                <label for="amount">Nombre de questions</label>
+                <input type="number" id="amount" min="1" max="50" value="10" required>
 
-      <label for="category">Catégorie </label>
-      <select id="category">
-        <option value="">Toutes les catégories</option>
-      </select><br>
+                <label for="category">Catégorie</label>
+                <select id="category">
+                    <option value="">Toutes les catégories</option>
+                </select>
 
-      <label for="difficulty">Niveau de difficulté</label>
-      <select id="difficulty">
-        <option value="">Tous les niveaux</option>
-        <option value="easy">Easy</option>
-        <option value="medium">Medium</option>
-        <option value="hard">Hard</option>
-      </select><br>
+                <label for="difficulty">Niveau de difficulté</label>
+                <select id="difficulty">
+                    <option value="">Tous les niveaux</option>
+                    <option value="easy">Facile</option>
+                    <option value="medium">Moyen</option>
+                    <option value="hard">Difficile</option>
+                </select>
 
-      <label for="type">Type de question</label>
-      <select id="type">
-        <option value="">Tous les types</option>
-        <option value="multiple">Choix multiples</option>
-        <option value="boolean">Vrai / Faux</option>
-      </select><br>
+                <label for="type">Type de question</label>
+                <select id="type">
+                    <option value="">Tous les types</option>
+                    <option value="multiple">Choix multiples</option>
+                    <option value="boolean">Vrai / Faux</option>
+                </select>
 
-      <button type="submit">Submit</button>
-    </form>
-  </div>
+                <button type="submit">Commencer le Quiz</button>
+            </form>
+        </div>
 
-  <script>
-    fetch("https://opentdb.com/api_category.php")
-      .then(rep => rep.json())
-      .then(data => {
-        const categorySelect = document.getElementById('category');
-        data.trivia_categories.forEach(cat => {
-          const option = document.createElement('option');
-          option.value = cat.id;
-          option.textContent = cat.name;
-          categorySelect.appendChild(option);
-        });
-      });
+        <div id="quiz-screen" class="hidden">
+            <header>
+                <h1>Quiz </h1>
+                <div id="score">Score : 0 / 0</div>
+            </header>
 
+            <main id="quiz-container"></main>
+        </div>
+    </div>
 
-      function navigate(page, params = {}) {
-      const url = new URL(page, window.location.origin);
-      for (const [key, value] of Object.entries(params)) {
-        if (value !== null && value !== undefined && value !== '') {
-          url.searchParams.append(key, String(value));
+    <script>
+        let questions = [];
+        let currentQuestion = 0;
+        let score = 0;
+        let timeLeft = 15;
+        let timer;
+        let quizConfig = {};
+        let userAnswer = null;
+        let answerSelected = false;
+
+        const configScreen = document.getElementById('config-screen');
+        const quizScreen = document.getElementById('quiz-screen');
+        const quizContainer = document.getElementById('quiz-container');
+        const scoreElement = document.getElementById('score');
+        const quizForm = document.getElementById('quiz-config');
+
+        fetch("https://opentdb.com/api_category.php")
+            .then(response => response.json())
+            .then(data => {
+                const categorySelect = document.getElementById('category');
+                data.trivia_categories.forEach(category => {
+                    const option = document.createElement('option');
+                    option.value = category.id;
+                    option.textContent = category.name;
+                    categorySelect.appendChild(option);
+                });
+            })
+            .catch(error => {
+                console.error('Erreur chargement catégories:', error);
+            });
+
+    
+        function decodeHtml(html) {
+            const txt = document.createElement('textarea');
+            txt.innerHTML = html;
+            return txt.value;
         }
-      }
-      window.location.href = url.toString();
-    }
 
-    document.getElementById('formid').addEventListener('submit', function(e) {
-      e.preventDefault(); 
+        quizForm.addEventListener('submit', function (e) {
+            e.preventDefault();
 
-      const amount = document.getElementById("amount").value;
-      const category = document.getElementById("category").value;
-      const difficulty = document.getElementById("difficulty").value;
-      const type = document.getElementById("type").value;
+            quizConfig = {
+                amount: document.getElementById("amount").value,
+                category: document.getElementById("category").value,
+                difficulty: document.getElementById("difficulty").value,
+                type: document.getElementById("type").value
+            };
 
-      navigate('https://meryem-khayati.github.io/quiz/question.html', {
-        amount: amount,
-        category: category,
-        difficulty: difficulty,
-        type: type
-      });
-    });
-  </script>
+            loadQuestions();
+        });
+
+        function loadQuestions() {
+            const params = new URLSearchParams();
+            if (quizConfig.amount) params.append('amount', quizConfig.amount);
+            if (quizConfig.category) params.append('category', quizConfig.category);
+            if (quizConfig.difficulty) params.append('difficulty', quizConfig.difficulty);
+            if (quizConfig.type) params.append('type', quizConfig.type);
+
+            const apiUrl = `https://opentdb.com/api.php?${params.toString()}`;
+
+            fetch(apiUrl)
+                .then(response => {
+                    if (!response.ok) throw new Error("Erreur de réseau");
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.response_code !== 0) throw new Error("Aucune question disponible");
+
+                    questions = data.results.map(question => {
+                        const correct = decodeHtml(question.correct_answer);
+                        const incorrect = question.incorrect_answers.map(decodeHtml);
+                        let answers = [...incorrect, correct];
+                        answers.sort(() => Math.random() - 0.5);
+
+                        return {
+                            question: decodeHtml(question.question),
+                            answers: answers,
+                            correctAnswer: correct
+                        };
+                    });
+
+                    configScreen.classList.add('hidden');
+                    quizScreen.classList.remove('hidden');
+
+                    scoreElement.textContent = `Score : 0 / ${questions.length}`;
+                    showQuestion();
+                })
+                .catch(error => {
+                    alert("Erreur: " + error.message);
+                    console.error(error);
+                });
+        }
+
+        function showQuestion() {
+            if (currentQuestion >= questions.length) {
+                showResults();
+                return;
+            }
+
+            clearInterval(timer);
+            timeLeft = 15;
+            userAnswer = null;
+            answerSelected = false;
+
+            const question = questions[currentQuestion];
+
+            let optionsHTML = question.answers.map((answer, index) => `
+                <label class="option" data-index="${index}">
+                    <input type="radio" name="answer" value="${index}">
+                    ${answer}
+                </label>
+            `).join('');
+
+            quizContainer.innerHTML = `
+                <div class="question-box">
+                    <h2>${currentQuestion + 1}. ${question.question}</h2>
+                    <div class="options-container">
+                        ${optionsHTML}
+                    </div>
+                    <div class="timer">
+                        Temps : <span id="time">${timeLeft}</span> s
+                    </div>
+                </div>
+            `;
+
+            document.querySelectorAll('.option').forEach(option => {
+                option.addEventListener('click', function() {
+                    if (answerSelected) return; 
+                    
+                    document.querySelectorAll('.option').forEach(opt => {
+                        opt.classList.remove('selected');
+                    });
+                    
+                    this.classList.add('selected');
+                    const radio = this.querySelector('input[type="radio"]');
+                    radio.checked = true;
+                    userAnswer = parseInt(this.dataset.index);
+                    answerSelected = true;
+                    
+                });
+            });
+
+            timer = setInterval(() => {
+                timeLeft--;
+                const timeSpan = document.getElementById('time');
+                if (timeSpan) timeSpan.textContent = timeLeft;
+
+                if (timeLeft <= 0) {
+                    clearInterval(timer);
+                    checkAnswerAndContinue();
+                }
+            }, 1000);
+        }
+
+        function checkAnswerAndContinue() {
+            const question = questions[currentQuestion];
+            let isCorrect = false;
+
+            if (userAnswer !== null) {
+                isCorrect = question.answers[userAnswer] === question.correctAnswer;
+                
+                if (isCorrect) {
+                    score++;
+                }
+
+                document.querySelectorAll('.option').forEach(option => {
+                    const optionIndex = parseInt(option.dataset.index);
+                    if (optionIndex === userAnswer) {
+                        option.classList.add(isCorrect ? 'correct' : 'incorrect');
+                    }
+                    if (question.answers[optionIndex] === question.correctAnswer) {
+                        option.classList.add('correct');
+                    }
+                });
+            }
+
+            scoreElement.textContent = `Score : ${score} / ${questions.length}`;
+
+            setTimeout(() => {
+                currentQuestion++;
+                showQuestion();
+            }, 2000);
+        }
+
+        function showResults() {
+            clearInterval(timer);
+
+            const percentage = Math.round((score / questions.length) * 100);
+           
+            quizContainer.innerHTML = `
+                <div class="result">
+                    <h2>Quiz Terminé !</h2>
+                    <p>Votre score est: ${score} / ${questions.length} (${percentage}%)</p>
+                </div>
+            `;
+        }
+
+        
+    </script>
 </body>
+
 </html>
